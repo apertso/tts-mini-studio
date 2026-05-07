@@ -14,8 +14,27 @@ const readProxyError = async (response, fallbackMessage) => {
     return `${fallbackMessage} (${response.status})`;
 };
 
+const createNetworkError = (error) => {
+    const message = error instanceof Error ? error.message : String(error || "");
+    if (message.toLowerCase() !== "failed to fetch") {
+        return error;
+    }
+
+    return new Error(
+        "Cannot reach the RunPod proxy. Check your network connection or switch the local docs server to local mode.",
+    );
+};
+
+const fetchProxy = async (path, options) => {
+    try {
+        return await fetch(`${normalizedProxyUrl}${path}`, options);
+    } catch (error) {
+        throw createNetworkError(error);
+    }
+};
+
 export const submitRunpodJob = async (payload) => {
-    const response = await fetch(normalizedProxyUrl, {
+    const response = await fetchProxy("", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",
@@ -36,8 +55,8 @@ export const checkRunpodStatus = async (jobId) => {
         throw new Error("RunPod status check requires a job id.");
     }
 
-    const response = await fetch(
-        `${normalizedProxyUrl}/status/${encodeURIComponent(normalizedJobId)}`,
+    const response = await fetchProxy(
+        `/status/${encodeURIComponent(normalizedJobId)}`,
         { method: "GET" },
     );
 
@@ -54,8 +73,8 @@ export const cancelRunpodJob = async (jobId) => {
         throw new Error("RunPod cancel requires a job id.");
     }
 
-    const response = await fetch(
-        `${normalizedProxyUrl}/cancel/${encodeURIComponent(normalizedJobId)}`,
+    const response = await fetchProxy(
+        `/cancel/${encodeURIComponent(normalizedJobId)}`,
         { method: "POST" },
     );
 
@@ -72,8 +91,8 @@ export const fetchRunpodAudioBytes = async (audioUrl) => {
         throw new Error("RunPod audio URL is empty.");
     }
 
-    const response = await fetch(
-        `${normalizedProxyUrl}/audio?url=${encodeURIComponent(normalizedAudioUrl)}`,
+    const response = await fetchProxy(
+        `/audio?url=${encodeURIComponent(normalizedAudioUrl)}`,
         { method: "GET" },
     );
 

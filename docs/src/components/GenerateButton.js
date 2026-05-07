@@ -1,5 +1,6 @@
 import { html } from "../lib/html.js";
 import { clampPercent } from "../utils/audioUtils.js";
+import { SpeakIcon } from "./icons.js";
 
 export const GenerateButton = ({
     disabled,
@@ -21,6 +22,7 @@ export const GenerateButton = ({
                 ? html`<span className="generate-progress" style=${{ width: `${safeProgress}%` }}></span>`
                 : null}
             <span className="generate-content">
+                <span className="generate-icon" aria-hidden="true">${SpeakIcon()}</span>
                 <span className="generate-label">${label}</span>
             </span>
         </button>

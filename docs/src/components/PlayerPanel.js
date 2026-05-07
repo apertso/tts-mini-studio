@@ -17,6 +17,10 @@ export const PlayerPanel = ({
     playerStateLabel,
     playerDescription,
 }) => {
+    if (!playerVisible) {
+        return null;
+    }
+
     const safeLoaded = clampPercent(loadedPercent);
     const safePlayed = clampPercent(playedPercent);
     const loadedScale = safeLoaded / 100;
@@ -27,52 +31,50 @@ export const PlayerPanel = ({
 
     return html`
         <section className="player-panel">
-            ${playerVisible ? html`
-                <div className="player-transport">
-                    <button
-                        className="play-btn"
-                        type="button"
-                        onClick=${onTogglePlayback}
-                        disabled=${safeLoaded === 0}
-                        aria-label=${isPlaying ? "Pause" : "Play"}
-                    >
-                        ${isPlaying ? PauseIcon() : PlayIcon()}
-                    </button>
+            <div className="player-transport" role="group" aria-label=${playerDescription}>
+                <button
+                    className="play-btn"
+                    type="button"
+                    onClick=${onTogglePlayback}
+                    disabled=${safeLoaded === 0}
+                    aria-label=${isPlaying ? "Pause" : "Play"}
+                >
+                    ${isPlaying ? PauseIcon() : PlayIcon()}
+                </button>
 
-                    <div className="track-shell">
-                        <div className="track">
-                            <div className="track-rail"></div>
-                            <div className="track-loaded" style=${{ "--track-scale": loadedScale }}></div>
-                            <div className="track-played" style=${{ "--track-scale": playedScale }}></div>
-                            <input
-                                className="range-input"
-                                type="range"
-                                min="0"
-                                max="100"
-                                step="0.01"
-                                value=${safePlayed}
-                                onInput=${onSeek}
-                                onChange=${onSeek}
-                                disabled=${safeLoaded === 0}
-                            />
-                            <div className="track-times">
-                                <span>${currentTime}</span>
-                                <span>${totalTime}</span>
-                            </div>
-                        </div>
+                <div className="track-shell">
+                    <span className="track-time track-time-current">${currentTime}</span>
+                    <div className="track">
+                        <div className="track-rail"></div>
+                        <div className="track-loaded" style=${{ "--track-scale": loadedScale }}></div>
+                        <div className="track-played" style=${{ "--track-scale": playedScale }}></div>
+                        <input
+                            className="range-input"
+                            type="range"
+                            min="0"
+                            max="100"
+                            step="0.01"
+                            value=${safePlayed}
+                            onInput=${onSeek}
+                            onChange=${onSeek}
+                            disabled=${safeLoaded === 0}
+                            aria-label="Audio position"
+                        />
                     </div>
-                    <button
-                        className="download-btn"
-                        type="button"
-                        onClick=${onDownload}
-                        disabled=${!canDownload}
-                        aria-label=${isDownloading ? "Downloading WAV" : "Download WAV"}
-                        title=${isDownloading ? "Downloading WAV" : "Download WAV"}
-                    >
-                        ${DownloadIcon()}
-                    </button>
+                    <span className="track-time track-time-total">${totalTime}</span>
                 </div>
-            ` : null}
+
+                <button
+                    className="download-btn"
+                    type="button"
+                    onClick=${onDownload}
+                    disabled=${!canDownload}
+                    aria-label=${isDownloading ? "Downloading WAV" : "Download WAV"}
+                    title=${isDownloading ? "Downloading WAV" : "Download WAV"}
+                >
+                    ${DownloadIcon()}
+                </button>
+            </div>
         </section>
     `;
 };

@@ -11,9 +11,9 @@ export const StudioPage = () => {
 
     return html`
         <div className="page-shell">
+            <div className="motion-ribbons" aria-hidden="true"></div>
+            ${StudioHeader()}
             <main className="studio-card">
-                ${StudioHeader()}
-
                 ${TextInputPanel({
                     text: studio.text,
                     charCount: studio.textCharCount,
@@ -21,42 +21,49 @@ export const StudioPage = () => {
                     isTextTooLong: studio.isTextTooLong,
                     onTextChange: studio.onTextChange,
                     onSubmit: studio.onPrimaryAction,
+                    statusText: studio.actionStatusText,
+                    statusClass: studio.actionStatusClass,
                 })}
 
-                ${VoiceLanguageControls({
-                    voice: studio.voice,
-                    voices: studio.voices,
-                    voicesReady: studio.voicesReady,
-                    voiceLoadFailed: studio.voiceLoadFailed,
-                    onVoiceChange: studio.onVoiceChange,
-                })}
+                <div className="control-dock">
+                    <div className="control-dock-top">
+                        ${PlayerPanel({
+                            playerVisible: studio.playerVisible,
+                            isPlaying: studio.isPlaying,
+                            loadedPercent: studio.loadedPercent,
+                            playedPercent: studio.playedPercent,
+                            timeDisplay: studio.timeDisplay,
+                            onTogglePlayback: studio.onTogglePlayback,
+                            onSeek: studio.onSeek,
+                            onDownload: studio.onDownload,
+                            canDownload: studio.canDownload,
+                            isDownloading: studio.isDownloading,
+                            playerStateClass: studio.playerStateClass,
+                            playerStateLabel: studio.playerStateLabel,
+                            playerDescription: studio.playerDescription,
+                        })}
+                        <div className=${`char-count-display ${studio.isTextTooLong ? "error" : ""}`}>
+                            ${studio.textCharCount}/${studio.maxTextCharacters}
+                        </div>
+                    </div>
+                    <div className="control-dock-bottom">
+                        ${VoiceLanguageControls({
+                            voice: studio.voice,
+                            voices: studio.voices,
+                            voicesReady: studio.voicesReady,
+                            voiceLoadFailed: studio.voiceLoadFailed,
+                            onVoiceChange: studio.onVoiceChange,
+                        })}
 
-                <section className="action-panel">
-                    ${GenerateButton({
-                        disabled: studio.isPrimaryActionDisabled,
-                        isGenerating: studio.isGenerating,
-                        label: studio.generationLabel,
-                        progress: studio.streamProgress,
-                        onClick: studio.onPrimaryAction,
-                    })}
-                    <p className=${`status-line ${studio.actionStatusClass}`}>${studio.actionStatusText}</p>
-                </section>
-
-                ${PlayerPanel({
-                    playerVisible: studio.playerVisible,
-                    isPlaying: studio.isPlaying,
-                    loadedPercent: studio.loadedPercent,
-                    playedPercent: studio.playedPercent,
-                    timeDisplay: studio.timeDisplay,
-                    onTogglePlayback: studio.onTogglePlayback,
-                    onSeek: studio.onSeek,
-                    onDownload: studio.onDownload,
-                    canDownload: studio.canDownload,
-                    isDownloading: studio.isDownloading,
-                    playerStateClass: studio.playerStateClass,
-                    playerStateLabel: studio.playerStateLabel,
-                    playerDescription: studio.playerDescription,
-                })}
+                        ${GenerateButton({
+                            disabled: studio.isPrimaryActionDisabled,
+                            isGenerating: studio.isGenerating,
+                            label: studio.generationLabel,
+                            progress: studio.streamProgress,
+                            onClick: studio.onPrimaryAction,
+                        })}
+                    </div>
+                </div>
             </main>
         </div>
     `;

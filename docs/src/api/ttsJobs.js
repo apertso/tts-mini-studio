@@ -41,6 +41,25 @@ const readApiError = async (response, fallbackMessage) => {
     return `${fallbackMessage} (${response.status})`;
 };
 
+const createNetworkError = (error) => {
+    const message = error instanceof Error ? error.message : String(error || "");
+    if (message.toLowerCase() !== "failed to fetch") {
+        return error;
+    }
+
+    return new Error(
+        `Cannot reach the local TTS API at ${API_BASE_URL}. Start the local backend with \`just dev\` or \`python -m tts\`, then try again.`,
+    );
+};
+
+const fetchLocalApi = async (path, options) => {
+    try {
+        return await fetch(`${API_BASE_URL}${path}`, options);
+    } catch (error) {
+        throw createNetworkError(error);
+    }
+};
+
 const normalizeJobId = (jobId) => {
     const normalized = String(jobId || "").trim();
     if (!normalized) {
@@ -68,7 +87,7 @@ export const submitTtsJob = async (payload) => {
         return response;
     }
 
-    const response = await fetch(`${API_BASE_URL}/tts/jobs`, {
+    const response = await fetchLocalApi("/tts/jobs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(requestPayload),
@@ -85,7 +104,7 @@ export const checkTtsJobStatus = async (jobId) => {
         return checkRunpodStatus(normalizedJobId);
     }
 
-    const response = await fetch(`${API_BASE_URL}/tts/jobs/${encodeURIComponent(normalizedJobId)}`, {
+    const response = await fetchLocalApi(`/tts/jobs/${encodeURIComponent(normalizedJobId)}`, {
         method: "GET",
     });
     if (!response.ok) {
@@ -100,8 +119,8 @@ export const cancelTtsJob = async (jobId) => {
         return cancelRunpodJob(normalizedJobId);
     }
 
-    const response = await fetch(
-        `${API_BASE_URL}/tts/jobs/${encodeURIComponent(normalizedJobId)}/cancel`,
+    const response = await fetchLocalApi(
+        `/tts/jobs/${encodeURIComponent(normalizedJobId)}/cancel`,
         { method: "POST" },
     );
     if (!response.ok) {
@@ -137,8 +156,8 @@ export const fetchTtsJobAudioBytes = async (jobId, statusPayload) => {
         throw new Error("RunPod completed but returned no audio.");
     }
 
-    const response = await fetch(
-        `${API_BASE_URL}/tts/jobs/${encodeURIComponent(normalizedJobId)}/audio`,
+    const response = await fetchLocalApi(
+        `/tts/jobs/${encodeURIComponent(normalizedJobId)}/audio`,
         { method: "GET" },
     );
     if (!response.ok) {

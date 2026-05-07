@@ -29,8 +29,34 @@ const INITIAL_STATUS = { text: "Ready to synthesize.", tone: "idle" };
 const RUNPOD_MODE = "runpod";
 const PENDING_JOB_VERSION = 1;
 const TEXT_LIMIT_ERROR_PREFIX = "Text exceeds maximum length:";
+const TOAST_VISIBLE_MS = 3600;
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const getErrorMessage = (error) => error instanceof Error ? error.message : String(error);
+
+const createLocalApiNetworkError = (error) => {
+    const message = getErrorMessage(error);
+    if (message.toLowerCase() !== "failed to fetch") {
+        return error;
+    }
+
+    return new Error(
+        `Cannot reach the local TTS API at ${API_BASE_URL}. Start the local backend with \`just dev\` or \`python -m tts\`, then try again.`,
+    );
+};
+
+const fetchLocalJson = async (path) => {
+    try {
+        const response = await fetch(`${API_BASE_URL}${path}`);
+        if (!response.ok) {
+            throw new Error(`Request failed (${response.status}).`);
+        }
+        return response.json();
+    } catch (error) {
+        throw createLocalApiNetworkError(error);
+    }
+};
 
 const normalizeTextValue = (value) => String(value || "").trim();
 
@@ -190,6 +216,22 @@ export const useTtsStudio = () => {
         activeJobIdRef.current = activeJobId;
     }, [activeJobId]);
 
+    useEffect(() => {
+        if (status.tone !== "success" && status.tone !== "error") {
+            return undefined;
+        }
+
+        const timeoutId = window.setTimeout(() => {
+            setStatus((currentStatus) => (
+                currentStatus.text === status.text && currentStatus.tone === status.tone
+                    ? INITIAL_STATUS
+                    : currentStatus
+            ));
+        }, TOAST_VISIBLE_MS);
+
+        return () => window.clearTimeout(timeoutId);
+    }, [status]);
+
     const syncPlayerUi = useCallback((controller) => {
         const loaded = controller.loadedDuration > 0 ? 100 : 0;
         const played = controller.loadedDuration > 0
@@ -301,7 +343,7 @@ export const useTtsStudio = () => {
                 statusPayload = await checkTtsJobStatus(normalizedJobId);
                 consecutiveStatusErrors = 0;
             } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
+                const message = getErrorMessage(error);
                 const lowered = message.toLowerCase();
 
                 if (lowered.includes("not found")) {
@@ -392,7 +434,7 @@ export const useTtsStudio = () => {
                 finishGeneration("Ready. You can listen or download WAV.", "success");
                 return;
             } catch (error) {
-                finishGeneration(`Error: ${error instanceof Error ? error.message : String(error)}`, "error");
+                finishGeneration(`Error: ${getErrorMessage(error)}`, "error");
                 return;
             }
         }
@@ -462,8 +504,7 @@ export const useTtsStudio = () => {
                         });
                     }
                 } else {
-                    const response = await fetch(`${API_BASE_URL}/api/voices`);
-                    const data = await response.json();
+                    const data = await fetchLocalJson("/api/voices");
                     if (cancelled) return;
 
                     const availableVoices = Array.isArray(data.voices) ? data.voices : [];
@@ -489,7 +530,7 @@ export const useTtsStudio = () => {
                 console.error("Failed to load voices:", error);
                 setVoicesReady(true);
                 setVoiceLoadFailed(true);
-                setStatus({ text: "Failed to load voices.", tone: "error" });
+                setStatus({ text: getErrorMessage(error), tone: "error" });
                 if (pendingSnapshot) {
                     clearActivePendingJob();
                     resetGenerationTracking();
@@ -589,7 +630,7 @@ export const useTtsStudio = () => {
             setIsGenerating(false);
             setIsCancelling(false);
             clearActivePendingJob();
-            setStatus({ text: `Error: ${error instanceof Error ? error.message : String(error)}`, tone: "error" });
+            setStatus({ text: `Error: ${getErrorMessage(error)}`, tone: "error" });
             resetGenerationTracking();
         }
     }, [
@@ -615,7 +656,7 @@ export const useTtsStudio = () => {
             setStatus({ text: "Cancel requested. Waiting for terminal status...", tone: "idle" });
         } catch (error) {
             setIsCancelling(false);
-            setStatus({ text: `Cancel failed: ${error instanceof Error ? error.message : String(error)}`, tone: "error" });
+            setStatus({ text: `Cancel failed: ${getErrorMessage(error)}`, tone: "error" });
         }
     }, [isGenerating]);
 
@@ -643,7 +684,7 @@ export const useTtsStudio = () => {
             triggerBlobDownload(generatedWavBlobRef.current, "speech.wav");
             setStatus({ text: "WAV downloaded.", tone: "success" });
         } catch (error) {
-            setStatus({ text: `Download error: ${error instanceof Error ? error.message : String(error)}`, tone: "error" });
+            setStatus({ text: `Download error: ${getErrorMessage(error)}`, tone: "error" });
         } finally {
             setIsDownloading(false);
         }
@@ -696,7 +737,7 @@ export const useTtsStudio = () => {
 
     const generationLabel = isGenerating
         ? (isCancelling ? "Cancelling..." : "Cancel")
-        : "Generate Voice";
+        : "Speak";
     const textCharCount = getNormalizedTextCharCount(text);
     const isTextTooLong = textCharCount > MAX_TEXT_CHARACTERS;
     const maxTextCharacters = MAX_TEXT_CHARACTERS;

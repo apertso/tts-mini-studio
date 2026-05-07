@@ -11,6 +11,8 @@ Live Demo - https://apertso.github.io/tts-mini-studio
 
 ## Quick Start
 
+Requires **Python 3.11**.
+
 ### 1) Install backend dependencies
 
 ```bash
