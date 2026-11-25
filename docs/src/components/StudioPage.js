@@ -65,6 +65,7 @@ export const StudioPage = () => {
                     </div>
                 </div>
             </main>
+            <a className="studio-credit" href="https://fish.audio" target="_blank" rel="noopener noreferrer">Built with Fish Audio</a>
         </div>
     `;
 };
