@@ -1,1 +1,1 @@
-"""Kokoro backend package with dual runtime modes."""
+"""TTS backend for Fish Audio Drama 3."""

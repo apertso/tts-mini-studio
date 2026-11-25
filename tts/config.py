@@ -7,69 +7,68 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-DEFAULT_CHUNK_LENGTH = 250
-MAX_TEXT_CHARACTERS = 25_000
-STREAM_CROSSFADE_MS = 32
-DEFAULT_INTER_CHUNK_PAUSE_MS = 45
+MAX_TEXT_CHARACTERS = 50_000
+# shortcut: stay under Fish Drama 3's 100_000 UTF-8 byte request cap; raise if one call accepts more.
+MAX_REQUEST_UTF8_BYTES = 80_000
+# Bound each self-hosted WAV response and report progress during long jobs.
+FISH_SPEECH_MAX_REQUEST_UTF8_BYTES = 2_000
+REQUEST_TIMEOUT_SECONDS = 600
 
-# Kokoro generation is less knob-heavy than the previous runtime; keep v1 defaults minimal.
-DEFAULT_SYNTHESIS_KWARGS = {
-    "speed": 1.0,
-}
-
-MAX_RMS_GAIN = 1.20
-MIN_RMS_GAIN = 0.83
-
-MODEL_ID_ENV_VAR = "MODEL_ID"
-HF_HOME_ENV_VAR = "HF_HOME"
-HUGGINGFACE_HUB_CACHE_ENV_VAR = "HUGGINGFACE_HUB_CACHE"
-TTS_DEVICE_ENV_VAR = "TTS_DEVICE"
-
-DEFAULT_MODEL_ID = "hexgrad/Kokoro-82M"
+DRAMA3_MODEL = "fish-audio/drama-3"
+OPENROUTER_SPEECH_URL = "https://openrouter.ai/api/v1/audio/speech"
+OPENROUTER_API_KEY_ENV = "OPENROUTER_API_KEY"
 
 DEFAULT_LANGUAGE = "en"
-SUPPORTED_LANGUAGES = ("en",)
-ALLOWED_TTS_DEVICES = {"auto", "cuda", "cpu"}
+SUPPORTED_LANGUAGES = ("en", "ru")
+ALLOWED_MODES = {"local", "runpod"}
 
 
-def _optional_env(var_name: str) -> str | None:
-    value = os.getenv(var_name)
-    if value is None:
-        return None
-    value = value.strip()
-    return value or None
+def _load_dotenv(path: Path) -> None:
+    if not path.is_file():
+        return
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, value = line.split("=", 1)
+        key = key.strip()
+        value = value.strip().strip('"').strip("'")
+        if key and key not in os.environ:
+            os.environ[key] = value
 
 
-def _resolve_path(value: str) -> Path:
-    return Path(value).expanduser().resolve()
+_load_dotenv(BASE_DIR / ".env")
+
+TTS_HOST = os.getenv("TTS_HOST", "0.0.0.0")
+TTS_PORT = int(os.getenv("TTS_PORT", "5000"))
+LOCAL_JOB_TTL_SECONDS = max(60, int(os.getenv("LOCAL_JOB_TTL_SECONDS", "3600")))
+LOCAL_JOB_MAX_TERMINAL = max(10, int(os.getenv("LOCAL_JOB_MAX_TERMINAL", "200")))
+MODE = (os.getenv("TTS_MODE", "local") or "local").strip().lower()
 
 
-def resolve_model_id() -> str:
-    return _optional_env(MODEL_ID_ENV_VAR) or DEFAULT_MODEL_ID
+def openrouter_api_key() -> str:
+    return (os.getenv(OPENROUTER_API_KEY_ENV) or "").strip()
 
 
-def resolve_optional_path(var_name: str) -> Path | None:
-    value = _optional_env(var_name)
-    if value is None:
-        return None
-    return _resolve_path(value)
+def fish_speech_base_url() -> str:
+    return os.getenv("FISH_SPEECH_BASE_URL", "").strip().rstrip("/")
 
 
-def resolve_tts_device_setting() -> str:
-    raw = (os.getenv(TTS_DEVICE_ENV_VAR, "auto") or "auto").strip().lower()
-    if raw not in ALLOWED_TTS_DEVICES:
-        expected = ", ".join(sorted(ALLOWED_TTS_DEVICES))
-        raise ValueError(
-            f"Invalid {TTS_DEVICE_ENV_VAR}: {raw!r}. Expected one of: {expected}"
-        )
-    return raw
+def fish_speech_api_key() -> str:
+    return os.getenv("FISH_SPEECH_API_KEY", "").strip()
 
 
-def resolve_kokoro_device(device_setting: str) -> str | None:
-    normalized = (device_setting or "auto").strip().lower()
-    if normalized == "auto":
-        return None
-    return normalized
+def speech_provider() -> str:
+    provider = os.getenv("TTS_PROVIDER", "openrouter").strip().lower()
+    if provider not in {"openrouter", "fish-speech"}:
+        raise ValueError("TTS_PROVIDER must be 'openrouter' or 'fish-speech'.")
+    return provider
+
+
+def speech_provider_configured(provider: str) -> bool:
+    if provider == "fish-speech":
+        return bool(fish_speech_base_url())
+    return bool(openrouter_api_key())
 
 
 def normalize_language_code(language: str | None) -> str:
@@ -79,26 +78,13 @@ def normalize_language_code(language: str | None) -> str:
 
     if raw.startswith("en"):
         return "en"
+    if raw.startswith("ru"):
+        return "ru"
 
     supported = ", ".join(SUPPORTED_LANGUAGES)
     raise ValueError(
         f"Unsupported language: {language!r}. Supported languages: [{supported}]"
     )
-
-
-MODEL_ID = resolve_model_id()
-HF_HOME = resolve_optional_path(HF_HOME_ENV_VAR)
-HUGGINGFACE_HUB_CACHE = resolve_optional_path(HUGGINGFACE_HUB_CACHE_ENV_VAR)
-TTS_DEVICE_SETTING = resolve_tts_device_setting()
-TTS_DEVICE = resolve_kokoro_device(TTS_DEVICE_SETTING)
-
-MODE = (os.getenv("TTS_MODE", "local") or "local").strip().lower()
-ALLOWED_MODES = {"local", "runpod"}
-
-TTS_HOST = os.getenv("TTS_HOST", "0.0.0.0")
-TTS_PORT = int(os.getenv("TTS_PORT", "5000"))
-LOCAL_JOB_TTL_SECONDS = max(60, int(os.getenv("LOCAL_JOB_TTL_SECONDS", "3600")))
-LOCAL_JOB_MAX_TERMINAL = max(10, int(os.getenv("LOCAL_JOB_MAX_TERMINAL", "200")))
 
 
 def validate_mode(mode: str) -> str:

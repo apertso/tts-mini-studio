@@ -10,16 +10,22 @@ from typing import Any, Optional
 from flask import Flask, jsonify, request, send_file
 
 from .config import (
+    DRAMA3_MODEL,
     LOCAL_JOB_MAX_TERMINAL,
     LOCAL_JOB_TTL_SECONDS,
     MAX_TEXT_CHARACTERS,
+    SUPPORTED_LANGUAGES,
     TTS_HOST,
     TTS_PORT,
     configure_stdio,
     normalize_language_code,
+    openrouter_api_key,
+    speech_provider,
+    speech_provider_configured,
 )
 from .core import (
     GenerationCancelledError,
+    classify_text_language,
     format_log_preview,
     generate_tts,
 )
@@ -263,9 +269,13 @@ def _validate_job_payload(data: dict[str, Any]) -> tuple[dict[str, Any] | None, 
         return None, "No text provided"
     if len(text) > MAX_TEXT_CHARACTERS:
         return None, (
-            f"Text exceeds maximum length: {MAX_TEXT_CHARACTERS} characters "
+            f"Text exceeds maximum length: {MAX_TEXT_CHARACTERS} symbols "
             f"(got {len(text)})."
         )
+    try:
+        classify_text_language(text)
+    except ValueError as exc:
+        return None, str(exc)
 
     raw_language = str(data.get("language", "en")).strip() or "en"
     try:
@@ -372,11 +382,15 @@ def get_tts_job_audio(job_id: str):
 
 @app.route("/health", methods=["GET"])
 def health():
+    provider = speech_provider()
     return {
         "status": "ok",
-        "model": "kokoro_82m",
+        "model": DRAMA3_MODEL,
+        "provider": provider,
+        "provider_configured": speech_provider_configured(provider),
         "job_api": True,
-        "supported_languages": ["en"],
+        "supported_languages": list(SUPPORTED_LANGUAGES),
+        "openrouter_configured": bool(openrouter_api_key()),
     }
 
 

@@ -1,33 +1,44 @@
 from __future__ import annotations
 
+import array
 import io
+import json
 import re
+import sys
 import threading
-from typing import Any, Callable, Iterator, List, Optional, Tuple
-
-import numpy as np
-from scipy.io import wavfile
+import unicodedata
+import urllib.error
+import urllib.request
+import wave
+from typing import Callable, Iterator, List, Optional
+from urllib.parse import urlsplit
 
 from .config import (
-    DEFAULT_CHUNK_LENGTH,
-    DEFAULT_INTER_CHUNK_PAUSE_MS,
-    DEFAULT_SYNTHESIS_KWARGS,
-    MAX_RMS_GAIN,
+    DRAMA3_MODEL,
+    FISH_SPEECH_MAX_REQUEST_UTF8_BYTES,
+    MAX_REQUEST_UTF8_BYTES,
     MAX_TEXT_CHARACTERS,
-    MIN_RMS_GAIN,
-    MODEL_ID,
-    STREAM_CROSSFADE_MS,
-    TTS_DEVICE,
-    TTS_DEVICE_SETTING,
+    OPENROUTER_SPEECH_URL,
+    REQUEST_TIMEOUT_SECONDS,
+    fish_speech_api_key,
+    fish_speech_base_url,
     normalize_language_code,
+    openrouter_api_key,
+    speech_provider,
 )
 from .voices import resolve_voice
 
 
-SENTENCE_END_PATTERN = re.compile("[.!?\u2026][\"')\\]]*$")
+SENTENCE_SPLIT_PATTERN = re.compile("(?<=[.!?\u2026])\\s+")
+SPLIT_HINT_PATTERN = re.compile(r"[,;:)\]\-]\s+|\s+")
+PCM_RATE_PATTERN = re.compile(r"(?:^|;)\s*rate\s*=\s*(\d+)", re.IGNORECASE)
+PCM_CHANNELS_PATTERN = re.compile(r"(?:^|;)\s*channels\s*=\s*(\d+)", re.IGNORECASE)
 
-_RUNTIME: Optional[dict[str, Any]] = None
-_RUNTIME_LOCK = threading.Lock()
+DEFAULT_PCM_RATE = 24000
+DEFAULT_PCM_CHANNELS = 1
+EDGE_FADE_MS = 8
+INTER_CHUNK_PAUSE_MS = 45
+
 ProgressCallback = Callable[[int, int], None]
 
 
@@ -42,338 +53,328 @@ def format_log_preview(text: str, limit: int = 50) -> str:
     return preview.encode("ascii", errors="backslashreplace").decode("ascii")
 
 
-def _load_runtime() -> dict[str, Any]:
-    from kokoro import KPipeline
-    import torch
+def classify_text_language(text: str) -> str:
+    """Return en, ru, or mixed. Reject letters outside Latin and Cyrillic.
 
-    if TTS_DEVICE == "cuda" and not torch.cuda.is_available():
-        raise RuntimeError(
-            "TTS_DEVICE is set to 'cuda' but torch.cuda.is_available() is False. "
-            "Install CUDA-enabled torch or switch TTS_DEVICE to 'auto'/'cpu'."
-        )
+    shortcut: other Latin-script languages are allowed; add a language id to block them.
+    """
+    has_latin = False
+    has_cyrillic = False
+    for char in text:
+        if not char.isalpha():
+            continue
+        name = unicodedata.name(char, "")
+        if name.startswith("LATIN "):
+            has_latin = True
+        elif name.startswith("CYRILLIC "):
+            has_cyrillic = True
+        else:
+            raise ValueError("Only English and Russian text is supported.")
 
-    print(
-        "Loading Kokoro runtime "
-        f"(MODEL_ID={MODEL_ID}, requested_device={TTS_DEVICE_SETTING}, "
-        f"torch={torch.__version__}, torch_cuda={torch.version.cuda}, "
-        f"cuda_available={torch.cuda.is_available()})"
-    )
-    pipelines = {
-        "a": KPipeline(lang_code="a", repo_id=MODEL_ID, device=TTS_DEVICE),
-        "b": KPipeline(lang_code="b", repo_id=MODEL_ID, device=TTS_DEVICE),
-    }
-    effective_devices = {
-        key: str(getattr(getattr(pipeline, "model", None), "device", "unknown"))
-        for key, pipeline in pipelines.items()
-    }
-    effective_device_label = ", ".join(
-        f"{key}:{device}" for key, device in sorted(effective_devices.items())
-    )
-    runtime = {
-        "pipelines": pipelines,
-        "sample_rate": 24000,
-        "model_id": MODEL_ID,
-        "requested_device": TTS_DEVICE_SETTING,
-        "effective_devices": effective_devices,
-    }
-    print(f"Kokoro runtime loaded. effective_devices={effective_device_label}")
-    return runtime
+    if has_cyrillic and not has_latin:
+        return "ru"
+    if has_latin and not has_cyrillic:
+        return "en"
+    return "mixed"
 
 
-def get_runtime() -> dict[str, Any]:
-    global _RUNTIME
-    if _RUNTIME is not None:
-        return _RUNTIME
-
-    with _RUNTIME_LOCK:
-        if _RUNTIME is None:
-            _RUNTIME = _load_runtime()
-
-    assert _RUNTIME is not None
-    return _RUNTIME
+def _utf8_len(text: str) -> int:
+    return len(text.encode("utf-8"))
 
 
-def get_sample_rate() -> int:
-    runtime = get_runtime()
-    return int(runtime["sample_rate"])
+def _window_within_bytes(text: str, max_bytes: int) -> str:
+    size = 0
+    chars: List[str] = []
+    for char in text:
+        char_size = len(char.encode("utf-8"))
+        if chars and size + char_size > max_bytes:
+            break
+        chars.append(char)
+        size += char_size
+    return "".join(chars)
 
 
-def resolve_chunk_length(_language: str) -> int:
-    return max(1, int(DEFAULT_CHUNK_LENGTH))
-
-
-def split_long_sentence(sentence: str, max_length: int) -> List[str]:
+def split_long_sentence(sentence: str, max_bytes: int) -> List[str]:
     sentence = sentence.strip()
     if not sentence:
         return []
-    if len(sentence) <= max_length:
+    if _utf8_len(sentence) <= max_bytes:
         return [sentence]
 
     parts: List[str] = []
     remaining = sentence
-
-    while len(remaining) > max_length:
-        window = remaining[: max_length + 1]
+    while _utf8_len(remaining) > max_bytes:
+        window = _window_within_bytes(remaining, max_bytes)
         split_pos = -1
-
-        for match in re.finditer(r"[,;:)\]\-]\s+|\s+", window):
+        for match in SPLIT_HINT_PATTERN.finditer(window):
             if match.start() > 0:
                 split_pos = match.start()
-
         if split_pos <= 0:
-            split_pos = max_length
+            split_pos = len(window)
 
         piece = remaining[:split_pos].strip()
         if not piece:
-            piece = remaining[:max_length].strip()
-            split_pos = max_length
-
+            piece = window.strip()
+            split_pos = len(window)
         parts.append(piece)
         remaining = remaining[split_pos:].strip()
 
     if remaining:
         parts.append(remaining)
-
     return parts
 
 
-def split_text(text: str, max_length: int) -> List[str]:
-    lines = text.split("\n")
+def split_text(text: str, max_bytes: int) -> List[str]:
     sentences: List[str] = []
-
-    for line in lines:
+    for line in text.split("\n"):
         line = line.strip()
         if not line:
             continue
-        parts = re.split("(?<=[.!?\u2026])\\s+", line)
-        for part in parts:
+        for part in SENTENCE_SPLIT_PATTERN.split(line):
             part = part.strip()
             if part:
-                sentences.extend(split_long_sentence(part, max_length))
+                sentences.extend(split_long_sentence(part, max_bytes))
 
     chunks: List[str] = []
-    current_chunk = ""
-
+    current = ""
     for sentence in sentences:
-        if len(current_chunk) == 0:
-            current_chunk = sentence
-        elif len(current_chunk) + len(sentence) + 1 <= max_length:
-            current_chunk += " " + sentence
+        if not current:
+            current = sentence
+        elif _utf8_len(current) + 1 + _utf8_len(sentence) <= max_bytes:
+            current = f"{current} {sentence}"
         else:
-            chunks.append(current_chunk)
-            current_chunk = sentence
-
-    if current_chunk:
-        chunks.append(current_chunk)
-
+            chunks.append(current)
+            current = sentence
+    if current:
+        chunks.append(current)
     return chunks
 
 
-def apply_edge_fade(
-    audio: np.ndarray, fade_samples: int, fade_in: bool, fade_out: bool
-) -> np.ndarray:
-    if fade_samples <= 1 or len(audio) == 0:
-        return audio
-
-    result = audio.astype(np.float32, copy=True)
-    fade_span = min(fade_samples, len(result))
-
-    if fade_in:
-        result[:fade_span] *= np.linspace(0.0, 1.0, fade_span, dtype=np.float32)
-    if fade_out:
-        result[-fade_span:] *= np.linspace(1.0, 0.0, fade_span, dtype=np.float32)
-
-    return result
+def parse_pcm_content_type(content_type: str) -> tuple[int, int]:
+    rate_match = PCM_RATE_PATTERN.search(content_type or "")
+    channel_match = PCM_CHANNELS_PATTERN.search(content_type or "")
+    rate = int(rate_match.group(1)) if rate_match else DEFAULT_PCM_RATE
+    channels = int(channel_match.group(1)) if channel_match else DEFAULT_PCM_CHANNELS
+    if rate <= 0 or channels <= 0:
+        raise RuntimeError(f"Invalid PCM content type: {content_type!r}")
+    return rate, channels
 
 
-def crossfade_chunks(
-    previous_audio: np.ndarray, current_audio: np.ndarray, overlap_samples: int
-) -> Tuple[np.ndarray, np.ndarray]:
-    overlap = min(overlap_samples, len(previous_audio), len(current_audio))
-    if overlap <= 0:
-        return previous_audio, current_audio
+def normalize_pcm(pcm: bytes, channels: int) -> bytes:
+    frame_bytes = 2 * channels
+    usable = len(pcm) - (len(pcm) % frame_bytes)
+    pcm = pcm[:usable]
+    if channels == 1:
+        return pcm
+    if channels != 2:
+        raise RuntimeError(f"Unsupported PCM channel count: {channels}")
 
-    previous_audio = previous_audio.astype(np.float32, copy=False)
-    current_audio = current_audio.astype(np.float32, copy=False)
-
-    previous_tail = previous_audio[-overlap:]
-    current_head = current_audio[:overlap]
-
-    previous_rms = float(np.sqrt(np.mean(previous_tail**2)) + 1e-8)
-    current_rms = float(np.sqrt(np.mean(current_head**2)) + 1e-8)
-    gain = float(np.clip(previous_rms / current_rms, MIN_RMS_GAIN, MAX_RMS_GAIN))
-    current_adjusted = current_audio * gain
-
-    phase = np.linspace(0.0, np.pi / 2.0, overlap, dtype=np.float32)
-    fade_out = np.cos(phase)
-    fade_in = np.sin(phase)
-    blended = previous_tail * fade_out + current_adjusted[:overlap] * fade_in
-
-    finalized_previous = np.concatenate([previous_audio[:-overlap], blended]).astype(
-        np.float32, copy=False
+    samples = array.array("h")
+    samples.frombytes(pcm)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    mixed = array.array(
+        "h",
+        ((samples[index] + samples[index + 1]) // 2 for index in range(0, len(samples), 2)),
     )
-    remaining_current = current_adjusted[overlap:].astype(np.float32, copy=False)
-    return finalized_previous, remaining_current
+    if sys.byteorder != "little":
+        mixed.byteswap()
+    return mixed.tobytes()
 
 
-def float_audio_to_int16_bytes(audio: np.ndarray) -> bytes:
-    clipped = np.clip(audio, -1.0, 1.0)
-    return (clipped * 32767.0).astype(np.int16).tobytes()
+def apply_edge_fade(pcm: bytes, sample_rate: int, fade_ms: int = EDGE_FADE_MS) -> bytes:
+    if len(pcm) < 4 or fade_ms <= 0:
+        return pcm
+    samples = array.array("h")
+    samples.frombytes(pcm)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    fade = min(len(samples) // 2, max(1, int(sample_rate * fade_ms / 1000)))
+    if fade <= 1:
+        return pcm
+    for index in range(fade):
+        in_gain = index / fade
+        out_gain = 1.0 - in_gain
+        samples[index] = int(samples[index] * in_gain)
+        samples[-1 - index] = int(samples[-1 - index] * out_gain)
+    if sys.byteorder != "little":
+        samples.byteswap()
+    return samples.tobytes()
 
 
-def ends_with_sentence_boundary(text_chunk: str) -> bool:
-    return bool(SENTENCE_END_PATTERN.search(text_chunk.strip()))
-
-
-def create_silence_bytes(duration_ms: int, sample_rate: int) -> bytes:
+def silence_pcm(duration_ms: int, sample_rate: int) -> bytes:
     if duration_ms <= 0:
         return b""
-    silence_samples = max(1, int(sample_rate * duration_ms / 1000))
-    return np.zeros(silence_samples, dtype=np.int16).tobytes()
+    sample_count = max(1, int(sample_rate * duration_ms / 1000))
+    return b"\x00\x00" * sample_count
 
 
-def extract_audio_array(audio: Any) -> np.ndarray:
-    if hasattr(audio, "cpu"):
-        audio = audio.cpu().numpy()
-
-    audio_array = np.asarray(audio, dtype=np.float32)
-    if audio_array.ndim > 1:
-        audio_array = audio_array.mean(axis=1)
-    return audio_array.astype(np.float32)
-
-
-def _synthesize_chunk_once(chunk: str, voice_selection: dict) -> np.ndarray:
-    runtime = get_runtime()
-    pipeline_key = voice_selection["pipeline"]
-    pipeline = runtime["pipelines"].get(pipeline_key)
-    if pipeline is None:
-        raise RuntimeError(f"Pipeline '{pipeline_key}' is not initialized for voice_id={voice_selection['id']}")
-
-    voice_id = voice_selection["voice_id"]
-    speed = float(DEFAULT_SYNTHESIS_KWARGS.get("speed", 1.0))
-
-    parts: list[np.ndarray] = []
-    generator = pipeline(chunk, voice=voice_id, speed=speed)
-    for _gs, _ps, audio in generator:
-        normalized = extract_audio_array(audio)
-        if normalized.size > 0:
-            parts.append(normalized)
-
-    if not parts:
-        return np.zeros(0, dtype=np.float32)
-
-    return np.concatenate(parts).astype(np.float32, copy=False)
+def pcm_to_wav(pcm: bytes, sample_rate: int) -> bytes:
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as wav_file:
+        wav_file.setnchannels(1)
+        wav_file.setsampwidth(2)
+        wav_file.setframerate(sample_rate)
+        wav_file.writeframes(pcm)
+    return buffer.getvalue()
 
 
-def synthesize_chunk(chunk: str, voice_selection: dict) -> np.ndarray:
-    return _synthesize_chunk_once(chunk=chunk, voice_selection=voice_selection)
+def _openrouter_error_message(status: int, body: bytes) -> str:
+    text = body.decode("utf-8", "replace").strip()
+    try:
+        payload = json.loads(text) if text else None
+    except json.JSONDecodeError:
+        payload = None
+    if isinstance(payload, dict):
+        error = payload.get("error")
+        if isinstance(error, dict) and error.get("message"):
+            return f"OpenRouter error {status}: {error['message']}"
+        if isinstance(error, str) and error.strip():
+            return f"OpenRouter error {status}: {error.strip()}"
+        if isinstance(payload.get("message"), str) and payload["message"].strip():
+            return f"OpenRouter error {status}: {payload['message'].strip()}"
+    if text:
+        return f"OpenRouter error {status}: {text[:300]}"
+    return f"OpenRouter error {status}."
+
+
+def synthesize_pcm(text: str, voice_id: str) -> tuple[bytes, int]:
+    api_key = openrouter_api_key()
+    if not api_key:
+        raise RuntimeError(
+            "Set OPENROUTER_API_KEY in the environment or in .env."
+        )
+
+    payload = {
+        "model": DRAMA3_MODEL,
+        "input": text,
+        "voice": voice_id,
+        "response_format": "pcm",
+        "provider": {"options": {"fish-audio": {"latency": "normal"}}},
+    }
+    request = urllib.request.Request(
+        OPENROUTER_SPEECH_URL,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "HTTP-Referer": "https://apertso.github.io/tts-mini-studio",
+            "X-Title": "TTS Mini Studio",
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            content_type = response.headers.get("Content-Type", "")
+            audio = response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(_openrouter_error_message(exc.code, exc.read())) from exc
+    except urllib.error.URLError as exc:
+        raise RuntimeError(f"OpenRouter request failed: {exc.reason}") from exc
+
+    if "mpeg" in content_type.lower():
+        raise RuntimeError("OpenRouter returned MP3 instead of PCM.")
+    if not audio:
+        raise RuntimeError("OpenRouter returned empty audio.")
+
+    rate, channels = parse_pcm_content_type(content_type)
+    print(f"OpenRouter PCM content-type={content_type or '<missing>'} rate={rate} channels={channels}")
+    return normalize_pcm(audio, channels), rate
+
+
+def _fish_speech_request(path: str, payload: dict | None = None) -> bytes:
+    base_url = fish_speech_base_url()
+    if not base_url:
+        raise RuntimeError("Set FISH_SPEECH_BASE_URL in the environment or in .env.")
+    try:
+        parsed = urlsplit(base_url)
+    except ValueError as exc:
+        raise RuntimeError("FISH_SPEECH_BASE_URL must be an HTTP(S) base URL.") from exc
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not parsed.hostname
+        or parsed.username is not None
+        or "?" in base_url
+        or "#" in base_url
+    ):
+        raise RuntimeError("FISH_SPEECH_BASE_URL must be an HTTP(S) base URL.")
+
+    headers = {"Accept": "application/json" if payload is None else "audio/wav"}
+    data = None
+    if payload is not None:
+        headers["Content-Type"] = "application/json"
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    api_key = fish_speech_api_key()
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+
+    request = urllib.request.Request(f"{base_url}{path}", data=data, headers=headers)
+    try:
+        with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SECONDS) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        raise RuntimeError(f"Fish Speech {path} returned HTTP {exc.code}.") from exc
+    except (urllib.error.URLError, TimeoutError) as exc:
+        raise RuntimeError(f"Fish Speech {path} request failed: {exc}") from exc
+
+
+def _check_fish_speech_voice(voice_id: str) -> None:
+    response = _fish_speech_request("/v1/references/list")
+    try:
+        references = json.loads(response)["reference_ids"]
+        if not isinstance(references, list):
+            raise TypeError("expected a list of references")
+    except (ValueError, KeyError, TypeError) as exc:
+        raise RuntimeError("Fish Speech returned an invalid voice reference list.") from exc
+    if voice_id not in references:
+        raise RuntimeError(f"Fish Speech voice reference {voice_id!r} is not registered.")
+
+
+def _synthesize_fish_speech_pcm(text: str, voice_id: str) -> tuple[bytes, int]:
+    payload = {
+        "text": text,
+        "format": "wav",
+        "streaming": False,
+    }
+    if voice_id != "surprise":
+        payload["reference_id"] = voice_id
+    audio = _fish_speech_request("/v1/tts", payload)
+    try:
+        with wave.open(io.BytesIO(audio), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            rate = wav_file.getframerate()
+            frame_count = wav_file.getnframes()
+            if wav_file.getsampwidth() != 2 or channels not in (1, 2) or rate <= 0:
+                raise wave.Error("expected mono or stereo 16-bit PCM")
+            pcm = wav_file.readframes(frame_count)
+            if not pcm or len(pcm) != frame_count * channels * 2:
+                raise wave.Error("empty or incomplete audio")
+    except (wave.Error, EOFError) as exc:
+        raise RuntimeError(f"Fish Speech returned invalid WAV audio: {exc or 'missing WAV header'}.") from exc
+    return normalize_pcm(pcm, channels), rate
 
 
 def generate_audio_chunks(
     text_chunks: List[str],
-    language: str,
     voice_selection: dict,
+    synthesize: Callable[[str, str], tuple[bytes, int]],
     progress_callback: Optional[ProgressCallback] = None,
     cancel_event: threading.Event | None = None,
-) -> Iterator[bytes]:
-    _ = language  # language is validated at preparation stage and fixed to English in v1.
-
-    sample_rate = get_sample_rate()
-    overlap_samples = int(sample_rate * STREAM_CROSSFADE_MS / 1000)
-    fade_samples = int(sample_rate * 0.01)
-    inter_chunk_pause_ms = int(DEFAULT_INTER_CHUNK_PAUSE_MS)
-    inter_chunk_pause_bytes = create_silence_bytes(inter_chunk_pause_ms, sample_rate)
-
-    if len(text_chunks) == 0:
-        return
-
+) -> Iterator[tuple[bytes, int]]:
     total_chunks = len(text_chunks)
+    print(f"Using Drama 3 voice: {voice_selection['id']} ({voice_selection['name']})")
 
-    print(
-        f"Using Kokoro voice: {voice_selection['id']} ({voice_selection['name']})"
-    )
-
-    pending_audio: Optional[np.ndarray] = None
-    pending_text_chunk: Optional[str] = None
-
-    for i, chunk in enumerate(text_chunks):
+    for index, chunk in enumerate(text_chunks):
         if cancel_event is not None and cancel_event.is_set():
             raise GenerationCancelledError("Generation was cancelled.")
 
-        print(f"Generating chunk {i + 1}/{len(text_chunks)}")
-        audio_float = np.clip(
-            synthesize_chunk(chunk=chunk, voice_selection=voice_selection),
-            -1.0,
-            1.0,
-        ).astype(np.float32)
-
+        print(f"Generating chunk {index + 1}/{total_chunks}")
+        # shortcut: a request already sent to the speech provider runs until it returns.
+        pcm, sample_rate = synthesize(chunk, voice_selection["voice_id"])
         if progress_callback is not None:
-            progress_callback(i + 1, total_chunks)
-
-        if len(audio_float) == 0:
-            continue
-
-        if pending_audio is None:
-            pending_audio = apply_edge_fade(
-                audio_float, fade_samples, fade_in=True, fade_out=False
-            )
-            pending_text_chunk = chunk
-            continue
-
-        boundary_has_sentence_pause = bool(
-            inter_chunk_pause_bytes
-            and pending_text_chunk
-            and ends_with_sentence_boundary(pending_text_chunk)
-        )
-
-        if boundary_has_sentence_pause:
-            finalized_audio = apply_edge_fade(
-                pending_audio, fade_samples, fade_in=False, fade_out=True
-            )
-            if len(finalized_audio) > 0:
-                yield float_audio_to_int16_bytes(finalized_audio) + inter_chunk_pause_bytes
-            pending_audio = apply_edge_fade(
-                audio_float, fade_samples, fade_in=True, fade_out=False
-            )
-        else:
-            finalized_audio, pending_audio = crossfade_chunks(
-                pending_audio, audio_float, overlap_samples
-            )
-            if len(finalized_audio) > 0:
-                yield float_audio_to_int16_bytes(finalized_audio)
-
-        pending_text_chunk = chunk
-
-    if pending_audio is not None and len(pending_audio) > 0:
-        pending_audio = apply_edge_fade(pending_audio, fade_samples, fade_in=False, fade_out=True)
-        yield float_audio_to_int16_bytes(pending_audio)
-
-
-def _prepare_generation(
-    text: str, voice_id: Optional[str], language: str
-) -> Tuple[List[str], str, dict]:
-    text = (text or "").strip()
-    if not text:
-        raise ValueError("No text provided")
-    if len(text) > MAX_TEXT_CHARACTERS:
-        raise ValueError(
-            f"Text exceeds maximum length: {MAX_TEXT_CHARACTERS} characters "
-            f"(got {len(text)})."
-        )
-
-    normalized_language = normalize_language_code(language)
-    voice_selection = resolve_voice(voice_id)
-
-    chunk_limit = resolve_chunk_length(normalized_language)
-    text_chunks = split_text(text, max_length=chunk_limit)
-    if len(text_chunks) == 0:
-        raise ValueError("No valid text provided")
-
-    print(
-        f"Total chunks: {len(text_chunks)}, chunk_limit={chunk_limit}, "
-        f"language={normalized_language}"
-    )
-    return text_chunks, normalized_language, voice_selection
+            progress_callback(index + 1, total_chunks)
+        if pcm:
+            yield pcm, sample_rate
 
 
 def generate_tts(
@@ -382,28 +383,64 @@ def generate_tts(
     language: str = "en",
     progress_callback: Optional[ProgressCallback] = None,
     cancel_event: threading.Event | None = None,
-):
-    text_chunks, normalized_language, voice_selection = _prepare_generation(
-        text=text,
-        voice_id=voice_id,
-        language=language,
+) -> bytes:
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("No text provided")
+    if len(text) > MAX_TEXT_CHARACTERS:
+        raise ValueError(
+            f"Text exceeds maximum length: {MAX_TEXT_CHARACTERS} symbols "
+            f"(got {len(text)})."
+        )
+
+    text_language = classify_text_language(text)
+    requested_language = normalize_language_code(language)
+    resolved_language = text_language if text_language in {"en", "ru"} else requested_language
+    provider = speech_provider()
+    if cancel_event is not None and cancel_event.is_set():
+        raise GenerationCancelledError("Generation was cancelled.")
+    voice_selection = resolve_voice(voice_id)
+    byte_limit = MAX_REQUEST_UTF8_BYTES
+    synthesize = synthesize_pcm
+    if provider == "fish-speech":
+        if voice_selection["voice_id"] != "surprise":
+            _check_fish_speech_voice(voice_selection["voice_id"])
+        byte_limit = FISH_SPEECH_MAX_REQUEST_UTF8_BYTES
+        synthesize = _synthesize_fish_speech_pcm
+    elif voice_selection["voice_id"] == "surprise":
+        raise ValueError("The Surprise voice requires the Fish Speech provider.")
+
+    text_chunks = split_text(text, max_bytes=byte_limit)
+    if not text_chunks:
+        raise ValueError("No valid text provided")
+
+    print(
+        f"Total chunks: {len(text_chunks)}, byte_limit={byte_limit}, "
+        f"language={resolved_language}, provider={provider}"
     )
 
-    audio_chunks = []
-    for audio_bytes in generate_audio_chunks(
-        text_chunks=text_chunks,
-        language=normalized_language,
-        voice_selection=voice_selection,
-        progress_callback=progress_callback,
-        cancel_event=cancel_event,
+    pieces: List[bytes] = []
+    sample_rate: Optional[int] = None
+    for index, (pcm, chunk_rate) in enumerate(
+        generate_audio_chunks(
+            text_chunks=text_chunks,
+            voice_selection=voice_selection,
+            synthesize=synthesize,
+            progress_callback=progress_callback,
+            cancel_event=cancel_event,
+        )
     ):
-        if audio_bytes:
-            audio_chunks.append(audio_bytes)
+        if sample_rate is None:
+            sample_rate = chunk_rate
+        elif chunk_rate != sample_rate:
+            raise RuntimeError(
+                f"Speech provider changed PCM rate from {sample_rate} to {chunk_rate}."
+            )
+        faded = apply_edge_fade(pcm, sample_rate)
+        if index > 0:
+            pieces.append(silence_pcm(INTER_CHUNK_PAUSE_MS, sample_rate))
+        pieces.append(faded)
 
-    if not audio_chunks:
+    if sample_rate is None or not pieces:
         raise RuntimeError("Generation failed: no audio chunks were produced")
-
-    final_audio = np.frombuffer(b"".join(audio_chunks), dtype=np.int16)
-    buffer = io.BytesIO()
-    wavfile.write(buffer, get_sample_rate(), final_audio)
-    return buffer.getvalue()
+    return pcm_to_wav(b"".join(pieces), sample_rate)
