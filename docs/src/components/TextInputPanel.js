@@ -52,7 +52,7 @@ export const TextInputPanel = ({
       <textarea
         id="tts-text"
         className="text-area"
-        placeholder="Type or paste your text here..."
+        placeholder="Type or paste English or Russian text..."
         aria-label="Text to synthesize"
         value=${text}
         aria-invalid=${isTextTooLong}

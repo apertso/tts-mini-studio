@@ -7,6 +7,8 @@ RUN uv venv /app/studio-venv --python /app/.venv/bin/python \
 
 COPY tts /app/studio/tts
 COPY scripts/runpod_drama3.py /app/studio/runpod_drama3.py
+# Fish Speech resolves reference_id to references/<id>/ relative to its /app working directory.
+COPY --chown=1000:1000 assets/voice_references /app/references
 
 ENV TTS_MODE=runpod \
     TTS_PROVIDER=fish-speech \

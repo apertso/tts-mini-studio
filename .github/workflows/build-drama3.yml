@@ -19,4 +19,4 @@ jobs:
           context: .
           file: Dockerfile.runpod-drama3
           push: true
-          tags: ghcr.io/apertso/tts-mini-studio:drama3-v1
+          tags: ghcr.io/apertso/tts-mini-studio:drama3-v2

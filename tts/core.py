@@ -399,7 +399,7 @@ def generate_tts(
     provider = speech_provider()
     if cancel_event is not None and cancel_event.is_set():
         raise GenerationCancelledError("Generation was cancelled.")
-    voice_selection = resolve_voice(voice_id)
+    voice_selection = resolve_voice(voice_id, provider)
     byte_limit = MAX_REQUEST_UTF8_BYTES
     synthesize = synthesize_pcm
     if provider == "fish-speech":
@@ -407,8 +407,6 @@ def generate_tts(
             _check_fish_speech_voice(voice_selection["voice_id"])
         byte_limit = FISH_SPEECH_MAX_REQUEST_UTF8_BYTES
         synthesize = _synthesize_fish_speech_pcm
-    elif voice_selection["voice_id"] == "surprise":
-        raise ValueError("The Surprise voice requires the Fish Speech provider.")
 
     text_chunks = split_text(text, max_bytes=byte_limit)
     if not text_chunks:

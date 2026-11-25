@@ -5,5 +5,5 @@ window.__TTS_CONFIG__ = {
     apiStreamingEnabled: false,
     runpodPollIntervalMs: 2000,
     runpodTimeoutMs: 900000,
-    maxTextCharacters: 25000,
+    maxTextCharacters: 50000,
 };
