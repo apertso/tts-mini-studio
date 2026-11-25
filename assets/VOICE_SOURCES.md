@@ -2,7 +2,13 @@
 
 Each folder in `voice_references/` is a Fish Speech reference: `sample.wav` plus its `sample.lab` transcript. The Drama 3 image copies them to `/app/references/<id>`. The voice IDs match `SELF_HOSTED_VOICES` in [`tts/voices.py`](../tts/voices.py).
 
-All clips are LibriVox audiobook readings. The voices carry generic names. The dataset terms ask users not to identify the readers.
+All clips are LibriVox audiobook readings. The voice names (Emma, Oliver, Anna and so on) are invented. They are not the readers' names: the dataset terms ask users not to identify the readers.
+
+The web UI plays `docs/voice-previews/<id>.mp3` as a preview of each voice. Each preview is the same clip re-encoded to mono 64 kbps MP3:
+
+```powershell
+ffmpeg -i assets/voice_references/<id>/sample.wav -ac 1 -codec:a libmp3lame -b:a 64k docs/voice-previews/<id>.mp3
+```
 
 | Voice ID | Dataset | Clip |
 | --- | --- | --- |
@@ -17,5 +23,5 @@ All clips are LibriVox audiobook readings. The voices carry generic names. The d
 
 ## Licenses and attribution
 
-- **LibriTTS-R** by Koizumi et al. (2023), derived from LibriTTS and LibriSpeech. Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Copy used: [mythicinfinity/libritts_r](https://huggingface.co/datasets/mythicinfinity/libritts_r). The clips are unmodified apart from the WAV container.
+- **LibriTTS-R** by Koizumi et al. (2023), derived from LibriTTS and LibriSpeech. Licensed under [CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). Copy used: [mythicinfinity/libritts_r](https://huggingface.co/datasets/mythicinfinity/libritts_r). The reference clips are unmodified apart from the WAV container. The web previews are also re-encoded to MP3.
 - **Russian LibriSpeech (RuLS)**, [OpenSLR 96](https://openslr.org/96). Public domain in the USA. Copy used: [istupakov/russian_librispeech](https://huggingface.co/datasets/istupakov/russian_librispeech).

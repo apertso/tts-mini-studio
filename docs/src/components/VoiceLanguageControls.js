@@ -1,6 +1,11 @@
 import { React, html } from "../lib/html.js";
+import { RUNPOD_FALLBACK_VOICES } from "../constants.js";
+import { PauseIcon, PlayIcon } from "./icons.js";
 
 const { useState, useRef, useEffect } = React;
+
+// The local API lists the same self-hosted IDs without preview paths, so look them up by ID.
+const previewUrl = (item) => item.preview || RUNPOD_FALLBACK_VOICES.find((v) => v.id === item.id)?.preview || "";
 
 const groupLabel = (locale) => {
     const value = String(locale || "");
@@ -33,7 +38,38 @@ export const VoiceLanguageControls = ({
     onVoiceChange,
 }) => {
     const [isOpen, setIsOpen] = useState(false);
+    const [previewingId, setPreviewingId] = useState("");
     const containerRef = useRef(null);
+    const previewAudioRef = useRef(null);
+
+    const stopPreview = () => {
+        previewAudioRef.current?.pause();
+        setPreviewingId("");
+    };
+
+    const togglePreview = (item) => {
+        if (previewingId === item.id) {
+            stopPreview();
+            return;
+        }
+        if (!previewAudioRef.current) {
+            previewAudioRef.current = new Audio();
+            previewAudioRef.current.addEventListener("ended", () => setPreviewingId(""));
+        }
+        const audio = previewAudioRef.current;
+        audio.src = previewUrl(item);
+        setPreviewingId(item.id);
+        audio.play().catch((error) => {
+            console.error("Voice preview failed:", error);
+            setPreviewingId("");
+        });
+    };
+
+    useEffect(() => {
+        if (!isOpen) stopPreview();
+    }, [isOpen]);
+
+    useEffect(() => () => previewAudioRef.current?.pause(), []);
 
     useEffect(() => {
         const handleClickOutside = (event) => {
@@ -68,17 +104,29 @@ export const VoiceLanguageControls = ({
                         ${voiceGroups(voices).map((group) => html`
                             <div key=${group.label} className="custom-select-group">${group.label}</div>
                             ${group.items.map((item) => html`
-                                <button
-                                    key=${item.id}
-                                    type="button"
-                                    className=${`custom-select-option ${item.id === voice ? "selected" : ""}`}
-                                    onClick=${() => {
-                                        onVoiceChange(item.id);
-                                        setIsOpen(false);
-                                    }}
-                                >
-                                    ${item.name}
-                                </button>
+                                <div key=${item.id} className=${`custom-select-option ${item.id === voice ? "selected" : ""}`}>
+                                    <button
+                                        type="button"
+                                        className="custom-select-option-label"
+                                        onClick=${() => {
+                                            onVoiceChange(item.id);
+                                            setIsOpen(false);
+                                        }}
+                                    >
+                                        ${item.name}
+                                    </button>
+                                    ${previewUrl(item) ? html`
+                                        <button
+                                            type="button"
+                                            className=${`voice-preview-button ${previewingId === item.id ? "is-playing" : ""}`}
+                                            aria-label=${`${previewingId === item.id ? "Stop" : "Listen to"} ${item.name}`}
+                                            title=${previewingId === item.id ? "Stop preview" : "Listen"}
+                                            onClick=${() => togglePreview(item)}
+                                        >
+                                            ${previewingId === item.id ? PauseIcon() : PlayIcon()}
+                                        </button>
+                                    ` : null}
+                                </div>
                             `)}
                         `)}
                     </div>

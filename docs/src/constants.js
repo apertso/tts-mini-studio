@@ -22,15 +22,16 @@ export const RUNPOD_TIMEOUT_MS = getNumericSetting(runtimeConfig.runpodTimeoutMs
 export const MAX_TEXT_CHARACTERS = getNumericSetting(runtimeConfig.maxTextCharacters, 50000, 1);
 export const DEFAULT_LANGUAGE = "en";
 // Mirrors SELF_HOSTED_VOICES in tts/voices.py; the Drama 3 image bundles a reference for each.
+// `preview` is an MP3 of that reference, served from docs/voice-previews.
 export const RUNPOD_FALLBACK_VOICES = [
-    { id: "en-female-1", name: "Female 1", source_type: "preset", locale: "en-US" },
-    { id: "en-female-2", name: "Female 2", source_type: "preset", locale: "en-US" },
-    { id: "en-male-1", name: "Male 1", source_type: "preset", locale: "en-US" },
-    { id: "en-male-2", name: "Male 2", source_type: "preset", locale: "en-US" },
-    { id: "ru-female-1", name: "Female 1", source_type: "preset", locale: "ru-RU" },
-    { id: "ru-female-2", name: "Female 2", source_type: "preset", locale: "ru-RU" },
-    { id: "ru-male-1", name: "Male 1", source_type: "preset", locale: "ru-RU" },
-    { id: "ru-male-2", name: "Male 2", source_type: "preset", locale: "ru-RU" },
+    { id: "en-female-1", name: "Emma", source_type: "preset", locale: "en-US", preview: "voice-previews/en-female-1.mp3" },
+    { id: "en-female-2", name: "Grace", source_type: "preset", locale: "en-US", preview: "voice-previews/en-female-2.mp3" },
+    { id: "en-male-1", name: "Oliver", source_type: "preset", locale: "en-US", preview: "voice-previews/en-male-1.mp3" },
+    { id: "en-male-2", name: "Henry", source_type: "preset", locale: "en-US", preview: "voice-previews/en-male-2.mp3" },
+    { id: "ru-female-1", name: "Anna", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-female-1.mp3" },
+    { id: "ru-female-2", name: "Vera", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-female-2.mp3" },
+    { id: "ru-male-1", name: "Ivan", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-male-1.mp3" },
+    { id: "ru-male-2", name: "Mikhail", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-male-2.mp3" },
     { id: "surprise", name: "Surprise", source_type: "preset", locale: "" },
 ];
 

@@ -563,18 +563,58 @@ textarea {
 }
 
 .custom-select-option {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  border-radius: 8px;
+  color: #101722;
+  font-weight: 500;
+  transition:
+    background 0.15s ease,
+    color 0.15s ease;
+}
+
+.custom-select-option-label {
+  flex: 1;
   background: transparent;
   border: none;
   padding: 0.5rem 0.75rem;
   text-align: left;
-  border-radius: 8px;
-  color: #101722;
+  color: inherit;
+  font: inherit;
   font-size: 0.9rem;
-  font-weight: 500;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.voice-preview-button {
+  flex: none;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-right: 0.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: 999px;
+  background: rgba(16, 23, 34, 0.06);
+  color: #101722;
   cursor: pointer;
   transition:
     background 0.15s ease,
     color 0.15s ease;
+}
+
+.voice-preview-button svg {
+  width: 0.8rem;
+  height: 0.8rem;
+  fill: currentColor;
+}
+
+.voice-preview-button:hover,
+.voice-preview-button.is-playing {
+  background: var(--orange);
+  color: #fff;
 }
 
 .custom-select-option:hover {
