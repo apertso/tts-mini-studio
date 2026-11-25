@@ -9,6 +9,9 @@ export const StudioHeader = () => html`
             <span></span>
             <span></span>
         </span>
-        <h1 className="studio-title">TTS Mini Studio</h1>
+        <div>
+            <h1 className="studio-title">TTS Mini Studio</h1>
+            <small>Built with Fish Audio</small>
+        </div>
     </header>
 `;
