@@ -28,9 +28,9 @@ export const RUNPOD_FALLBACK_VOICES = [
     { id: "en-female-2", name: "Grace", source_type: "preset", locale: "en-US", preview: "voice-previews/en-female-2.mp3" },
     { id: "en-male-1", name: "Oliver", source_type: "preset", locale: "en-US", preview: "voice-previews/en-male-1.mp3" },
     { id: "en-male-2", name: "Henry", source_type: "preset", locale: "en-US", preview: "voice-previews/en-male-2.mp3" },
-    { id: "ru-female-1", name: "Anna", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-female-1.mp3" },
-    { id: "ru-female-2", name: "Vera", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-female-2.mp3" },
-    { id: "ru-male-1", name: "Ivan", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-male-1.mp3" },
+    { id: "ru-female-1", name: "Masha", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-female-1.mp3" },
+    { id: "ru-female-2", name: "Sveta", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-female-2.mp3" },
+    { id: "ru-male-1", name: "Dima", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-male-1.mp3" },
     { id: "ru-male-2", name: "Mikhail", source_type: "preset", locale: "ru-RU", preview: "voice-previews/ru-male-2.mp3" },
     { id: "surprise", name: "Surprise", source_type: "preset", locale: "" },
 ];

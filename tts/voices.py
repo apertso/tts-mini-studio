@@ -19,16 +19,16 @@ CLOUD_VOICES = [
     {"id": "de9a2c99fcee4dfbbaec90327eab36d8", "name": "Egor", "gender": "male", "locale": "ru-RU"},
 ]
 
-# Self-hosted Fish Speech references from public audiobook datasets; see assets/VOICE_SOURCES.md.
-# Names are invented, not the readers' own. Each ID is a folder with sample.wav and sample.lab, baked into the Drama 3 image as /app/references/<id>.
+# Self-hosted Fish Speech references from public speech datasets; see assets/VOICE_SOURCES.md.
+# LibriVox voices have invented names; Dialogs voices keep the actors' names. Each ID is a folder with sample.wav and sample.lab, baked into the Drama 3 image as /app/references/<id>.
 SELF_HOSTED_VOICES = [
     {"id": "en-female-1", "name": "Emma", "gender": "female", "locale": "en-US"},
     {"id": "en-female-2", "name": "Grace", "gender": "female", "locale": "en-US"},
     {"id": "en-male-1", "name": "Oliver", "gender": "male", "locale": "en-US"},
     {"id": "en-male-2", "name": "Henry", "gender": "male", "locale": "en-US"},
-    {"id": "ru-female-1", "name": "Anna", "gender": "female", "locale": "ru-RU"},
-    {"id": "ru-female-2", "name": "Vera", "gender": "female", "locale": "ru-RU"},
-    {"id": "ru-male-1", "name": "Ivan", "gender": "male", "locale": "ru-RU"},
+    {"id": "ru-female-1", "name": "Masha", "gender": "female", "locale": "ru-RU"},
+    {"id": "ru-female-2", "name": "Sveta", "gender": "female", "locale": "ru-RU"},
+    {"id": "ru-male-1", "name": "Dima", "gender": "male", "locale": "ru-RU"},
     {"id": "ru-male-2", "name": "Mikhail", "gender": "male", "locale": "ru-RU"},
     # Reference-free: Drama 3 picks a new voice on every request.
     {"id": "surprise", "name": "Surprise", "gender": "", "locale": ""},
