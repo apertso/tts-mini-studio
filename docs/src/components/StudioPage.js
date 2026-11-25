@@ -23,6 +23,7 @@ export const StudioPage = () => {
                     onSubmit: studio.onPrimaryAction,
                     statusText: studio.actionStatusText,
                     statusClass: studio.actionStatusClass,
+                    onDismissStatus: studio.onDismissStatus,
                 })}
 
                 <div className="control-dock">

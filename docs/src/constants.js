@@ -39,4 +39,5 @@ export const STORAGE_KEYS = {
     text: "tts_text",
     voice: "tts_voice",
     pendingJob: "tts_pending_job_v1",
+    lastError: "tts_last_error_v1",
 };

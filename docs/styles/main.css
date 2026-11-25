@@ -934,6 +934,32 @@ textarea {
 
 .status-toast.status-error {
   color: #e54d3d;
+  pointer-events: auto;
+}
+
+.status-toast-close {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  margin-right: -0.5rem;
+  padding: 0;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+
+.status-toast-close:hover {
+  background: rgba(229, 77, 61, 0.1);
+}
+
+.status-toast-close svg {
+  width: 0.9rem;
+  height: 0.9rem;
 }
 
 .panel,

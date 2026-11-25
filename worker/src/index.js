@@ -2,6 +2,13 @@ const RUNPOD_ROUTE = '/api/runpod';
 const RUNPOD_STATUS_PREFIX = '/api/runpod/status/';
 const RUNPOD_CANCEL_PREFIX = '/api/runpod/cancel/';
 const RUNPOD_AUDIO_ROUTE = '/api/runpod/audio';
+// RunPod's endpoint default is 10 minutes, too short for long texts. Override with RUNPOD_EXECUTION_TIMEOUT_MS.
+const DEFAULT_EXECUTION_TIMEOUT_MS = 30 * 60 * 1000;
+
+const readExecutionTimeoutMs = (env) => {
+  const value = Number(env.RUNPOD_EXECUTION_TIMEOUT_MS);
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : DEFAULT_EXECUTION_TIMEOUT_MS;
+};
 
 const parseAllowedOrigins = (value) =>
   String(value || '')
@@ -210,7 +217,11 @@ export default {
               'Content-Type': 'application/json',
               Authorization: `Bearer ${env.RUNPOD_API_KEY}`,
             },
-            body: JSON.stringify(body),
+            // The Worker sets the policy so browsers cannot request longer GPU time.
+            body: JSON.stringify({
+              ...body,
+              policy: { executionTimeout: readExecutionTimeoutMs(env) },
+            }),
           }
         );
 

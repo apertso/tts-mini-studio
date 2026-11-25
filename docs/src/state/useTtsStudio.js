@@ -133,6 +133,40 @@ const extractJobChunkProgress = (statusPayload) => {
 
 const normalizeJobStatus = (status) => String(status || "").trim().toUpperCase();
 
+const describeJobError = (errorText) => (
+    /executiontimeout/i.test(String(errorText))
+        ? "Generation ran past the RunPod time limit. Try a shorter text or split it into parts."
+        : errorText
+);
+
+// A failed job's error stays until dismissed, including across reloads.
+const saveLastError = (text) => {
+    const at = new Date().toLocaleString([], { dateStyle: "short", timeStyle: "short" });
+    const stampedText = `${text} (${at})`;
+    try {
+        localStorage.setItem(STORAGE_KEYS.lastError, stampedText);
+    } catch {
+        // Storage can be unavailable; the error still shows for this visit.
+    }
+    return stampedText;
+};
+
+const readLastError = () => {
+    try {
+        return localStorage.getItem(STORAGE_KEYS.lastError) || "";
+    } catch {
+        return "";
+    }
+};
+
+const clearLastError = () => {
+    try {
+        localStorage.removeItem(STORAGE_KEYS.lastError);
+    } catch {
+        // Nothing to clear.
+    }
+};
+
 const readPendingJobSnapshot = () => {
     try {
         const raw = localStorage.getItem(STORAGE_KEYS.pendingJob);
@@ -217,7 +251,7 @@ export const useTtsStudio = () => {
     }, [activeJobId]);
 
     useEffect(() => {
-        if (status.tone !== "success" && status.tone !== "error") {
+        if (status.tone !== "success") {
             return undefined;
         }
 
@@ -292,9 +326,18 @@ export const useTtsStudio = () => {
     const finishGeneration = useCallback((nextStatusText, nextStatusTone) => {
         setIsGenerating(false);
         setIsCancelling(false);
-        setStatus({ text: nextStatusText, tone: nextStatusTone });
+        if (nextStatusTone === "error") {
+            setStatus({ text: saveLastError(nextStatusText), tone: "error" });
+        } else {
+            setStatus({ text: nextStatusText, tone: nextStatusTone });
+        }
         clearActivePendingJob();
     }, [clearActivePendingJob]);
+
+    const dismissStatus = useCallback(() => {
+        clearLastError();
+        setStatus(INITIAL_STATUS);
+    }, []);
 
     const applyWavBytesToPlayer = useCallback(async (wavBytes) => {
         const controller = audioControllerRef.current;
@@ -347,7 +390,7 @@ export const useTtsStudio = () => {
                 const lowered = message.toLowerCase();
 
                 if (lowered.includes("not found")) {
-                    finishGeneration("Pending job was not found. Lock was cleared.", "error");
+                    finishGeneration("Error: The last job is no longer available. Its result expired before this page checked it.", "error");
                     resetGenerationTracking();
                     return;
                 }
@@ -417,7 +460,7 @@ export const useTtsStudio = () => {
                 const tone = jobStatus === "CANCELLED" ? "idle" : "error";
                 const textValue = jobStatus === "CANCELLED"
                     ? "Generation cancelled."
-                    : `Error: ${errorText}`;
+                    : `Error: ${describeJobError(errorText)}`;
                 finishGeneration(textValue, tone);
                 if (jobStatus === "CANCELLED") {
                     resetGenerationTracking();
@@ -525,6 +568,11 @@ export const useTtsStudio = () => {
                 if (!cancelled && pendingSnapshot) {
                     restorePendingJob(pendingSnapshot);
                 }
+
+                const lastError = readLastError();
+                if (!cancelled && !pendingSnapshot && lastError) {
+                    setStatus({ text: lastError, tone: "error" });
+                }
             } catch (error) {
                 if (cancelled) return;
                 console.error("Failed to load voices:", error);
@@ -593,6 +641,7 @@ export const useTtsStudio = () => {
             return;
         }
 
+        clearLastError();
         controller.reset();
         generatedWavBlobRef.current = null;
         sampleRateRef.current = 24000;
@@ -627,14 +676,12 @@ export const useTtsStudio = () => {
             setStreamProgress(20);
             void pollJobUntilTerminal(jobId);
         } catch (error) {
-            setIsGenerating(false);
-            setIsCancelling(false);
-            clearActivePendingJob();
-            setStatus({ text: `Error: ${getErrorMessage(error)}`, tone: "error" });
+            finishGeneration(`Error: ${getErrorMessage(error)}`, "error");
             resetGenerationTracking();
         }
     }, [
         clearActivePendingJob,
+        finishGeneration,
         isGenerating,
         isRunpodMode,
         pollJobUntilTerminal,
@@ -794,6 +841,7 @@ export const useTtsStudio = () => {
         onVoiceChange: setVoice,
         onPrimaryAction: handlePrimaryAction,
         onDownload: downloadAudio,
+        onDismissStatus: dismissStatus,
         onTogglePlayback: handleTogglePlayback,
         onSeek: handleSeek,
     };

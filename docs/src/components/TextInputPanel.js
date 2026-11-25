@@ -9,6 +9,7 @@ export const TextInputPanel = ({
   onSubmit,
   statusText,
   statusClass,
+  onDismissStatus,
 }) => {
   const safeCharCount = Math.max(0, Number(charCount) || 0);
   const safeMaxChars = Math.max(1, Number(maxTextCharacters) || 1);
@@ -47,6 +48,14 @@ export const TextInputPanel = ({
             `}
           </span>
           <span className="status-toast-text">${renderToastText(statusText)}</span>
+          ${isError ? html`
+            <button type="button" className="status-toast-close" aria-label="Dismiss error" title="Dismiss" onClick=${onDismissStatus}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+              </svg>
+            </button>
+          ` : null}
         </div>
       ` : null}
       <textarea
