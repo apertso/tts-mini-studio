@@ -1,0 +1,20 @@
+FROM fishaudio/fish-speech:server-cuda
+
+WORKDIR /app
+COPY requirements.runpod.txt /tmp/requirements.runpod.txt
+RUN uv venv /app/studio-venv --python /app/.venv/bin/python \
+    && uv pip install --python /app/studio-venv/bin/python -r /tmp/requirements.runpod.txt
+
+COPY tts /app/studio/tts
+COPY scripts/runpod_drama3.py /app/studio/runpod_drama3.py
+
+ENV TTS_MODE=runpod \
+    TTS_PROVIDER=fish-speech \
+    FISH_SPEECH_BASE_URL=http://127.0.0.1:8080 \
+    API_SERVER_NAME=127.0.0.1 \
+    API_SERVER_PORT=8080 \
+    DEVICE=cuda:0 \
+    COMPILE=0 \
+    PYTHONPATH=/app/studio
+
+ENTRYPOINT ["/app/studio-venv/bin/python", "/app/studio/runpod_drama3.py"]
