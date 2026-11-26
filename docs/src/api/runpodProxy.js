@@ -85,6 +85,24 @@ export const cancelRunpodJob = async (jobId) => {
     return response.json();
 };
 
+// Long results stay in the audio bucket after RunPod forgets the job. Returns null if none is stored.
+export const fetchRunpodStoredAudioBytes = async (jobId) => {
+    const response = await fetchProxy(
+        `/stored-audio/${encodeURIComponent(String(jobId || "").trim())}`,
+        { method: "GET" },
+    );
+
+    if (response.status === 404) {
+        return null;
+    }
+    if (!response.ok) {
+        throw new Error(await readProxyError(response, "Stored audio download failed"));
+    }
+
+    const buffer = await response.arrayBuffer();
+    return buffer.byteLength ? new Uint8Array(buffer) : null;
+};
+
 export const fetchRunpodAudioBytes = async (audioUrl) => {
     const normalizedAudioUrl = String(audioUrl || "").trim();
     if (!normalizedAudioUrl) {

@@ -2,6 +2,10 @@ const RUNPOD_ROUTE = '/api/runpod';
 const RUNPOD_STATUS_PREFIX = '/api/runpod/status/';
 const RUNPOD_CANCEL_PREFIX = '/api/runpod/cancel/';
 const RUNPOD_AUDIO_ROUTE = '/api/runpod/audio';
+const RUNPOD_STORED_AUDIO_PREFIX = '/api/runpod/stored-audio/';
+// Must match RUNPOD_AUDIO_UPLOAD_PREFIX on the RunPod worker (tts/runpod.py).
+const DEFAULT_AUDIO_UPLOAD_PREFIX = 'tts-audio';
+const JOB_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
 // RunPod's endpoint default is 10 minutes, too short for long texts. Override with RUNPOD_EXECUTION_TIMEOUT_MS.
 const DEFAULT_EXECUTION_TIMEOUT_MS = 30 * 60 * 1000;
 
@@ -72,6 +76,25 @@ const extractCancelJobId = (pathname) => {
   }
 };
 
+const extractStoredAudioJobId = (pathname) => {
+  if (!pathname.startsWith(RUNPOD_STORED_AUDIO_PREFIX)) return null;
+  const rawId = pathname.slice(RUNPOD_STORED_AUDIO_PREFIX.length);
+  return JOB_ID_PATTERN.test(rawId) ? rawId : null;
+};
+
+const STORED_AUDIO_SUFFIX_PATTERN = /^[0-9a-f]{8}\.wav$/;
+
+// The RunPod worker uploads results over 6.5 MB as <prefix>/<job id>-<8 hex>.wav.
+// RunPod forgets finished jobs after a while; this finds the upload by job ID.
+const findStoredAudio = async (bucket, prefix, jobId) => {
+  const keyPrefix = `${prefix}/${jobId}-`;
+  const listing = await bucket.list({ prefix: keyPrefix });
+  const matches = listing.objects
+    .filter((object) => STORED_AUDIO_SUFFIX_PATTERN.test(object.key.slice(keyPrefix.length)))
+    .sort((a, b) => b.uploaded - a.uploaded);
+  return matches[0] ? bucket.get(matches[0].key) : null;
+};
+
 const parseHttpUrl = (value) => {
   const candidate = String(value || '').trim();
   if (!candidate) return null;
@@ -102,6 +125,35 @@ export default {
         status: 204,
         headers: corsHeaders,
       });
+    }
+
+    const storedAudioJobId = extractStoredAudioJobId(url.pathname);
+    if (request.method === 'GET' && storedAudioJobId) {
+      if (!env.AUDIO_BUCKET) {
+        return jsonResponse({ error: 'Audio bucket is not bound' }, 501, corsHeaders);
+      }
+      try {
+        const prefix = String(env.RUNPOD_AUDIO_UPLOAD_PREFIX || DEFAULT_AUDIO_UPLOAD_PREFIX).replace(/\/+$/, '');
+        const object = await findStoredAudio(env.AUDIO_BUCKET, prefix, storedAudioJobId);
+        if (!object) {
+          return jsonResponse({ error: 'Stored audio not found' }, 404, corsHeaders);
+        }
+        return new Response(object.body, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            'Content-Type': 'audio/wav',
+            'Content-Length': String(object.size),
+            'Cache-Control': 'no-store',
+          },
+        });
+      } catch (error) {
+        return jsonResponse(
+          { error: 'Stored audio lookup failed', details: String(error) },
+          500,
+          corsHeaders
+        );
+      }
     }
 
     const statusJobId = extractStatusJobId(url.pathname);

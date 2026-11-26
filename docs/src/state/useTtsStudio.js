@@ -13,6 +13,7 @@ import {
     TERMINAL_JOB_STATUSES,
     cancelTtsJob,
     checkTtsJobStatus,
+    fetchStoredJobAudioBytes,
     fetchTtsJobAudioBytes,
     submitTtsJob,
 } from "../api/ttsJobs.js";
@@ -390,7 +391,22 @@ export const useTtsStudio = () => {
                 const lowered = message.toLowerCase();
 
                 if (lowered.includes("not found")) {
-                    finishGeneration("Error: The last job is no longer available. Its result expired before this page checked it.", "error");
+                    // The job record expired; long results may still be in the audio bucket.
+                    setStatus({ text: "Job record expired. Looking for saved audio...", tone: "idle" });
+                    try {
+                        const storedBytes = await fetchStoredJobAudioBytes(normalizedJobId);
+                        if (pollingTokenRef.current !== token) {
+                            return;
+                        }
+                        if (storedBytes) {
+                            await applyWavBytesToPlayer(storedBytes);
+                            finishGeneration("Recovered your audio from storage. You can listen or download WAV.", "success");
+                            return;
+                        }
+                        finishGeneration("Error: The last job is no longer available, and no saved copy was found. Its result expired before this page checked it.", "error");
+                    } catch (recoveryError) {
+                        finishGeneration(`Error: The last job expired and its saved audio could not be loaded: ${getErrorMessage(recoveryError)}`, "error");
+                    }
                     resetGenerationTracking();
                     return;
                 }

@@ -3,6 +3,7 @@ import {
     cancelRunpodJob,
     checkRunpodStatus,
     fetchRunpodAudioBytes,
+    fetchRunpodStoredAudioBytes,
     submitRunpodJob,
 } from "./runpodProxy.js";
 
@@ -128,6 +129,11 @@ export const cancelTtsJob = async (jobId) => {
     }
     return response.json();
 };
+
+// Only RunPod mode keeps results after the job record is gone.
+export const fetchStoredJobAudioBytes = async (jobId) => (
+    isRunpodMode ? fetchRunpodStoredAudioBytes(normalizeJobId(jobId)) : null
+);
 
 export const fetchTtsJobAudioBytes = async (jobId, statusPayload) => {
     const normalizedJobId = normalizeJobId(jobId);
